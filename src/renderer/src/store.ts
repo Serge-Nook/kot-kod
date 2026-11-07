@@ -180,7 +180,6 @@ export async function refresh(): Promise<void> {
 
 export function errorText(e: unknown): { text: string; details?: string } {
   // lazy import to avoid a cycle
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { t, hasKey } = i18nRef
   if (e instanceof ApiCallError) {
     const key = `err.${e.code}`
