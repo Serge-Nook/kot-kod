@@ -1,0 +1,58 @@
+appId: ru.nookbat.kotkod
+productName: Kot-kod
+executableName: kot-kod
+copyright: © 2026 Горшков Сергей Владимирович
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!tests/*'
+  - '!docs/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!vitest.config.ts'
+  - '!{.eslintrc.cjs,.prettierrc.yaml,.prettierignore}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+asarUnpack:
+  - resources/**
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: build/icons
+  maintainer: Горшков Сергей Владимирович <info@nookbat.ru>
+  vendor: Горшков Сергей Владимирович
+  category: Development
+  synopsis: Git-клиент для GitHub и GitVerse
+  description: Графический клиент Git с русскоязычным интерфейсом, поддержкой GitHub и GitVerse.
+  desktop:
+    Name: Кот-код
+    GenericName: Git-клиент
+    Comment: Git-клиент для GitHub и GitVerse
+    Keywords: git;github;gitverse;vcs;
+    StartupWMClass: kot-kod
+    Categories: Development;RevisionControl;
+appImage:
+  artifactName: Kot-kod-${version}-x86_64.AppImage
+deb:
+  artifactName: kot-kod_${version}_amd64.deb
+  depends:
+    - git
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+  recommends:
+    - gnome-keyring
+  fpm:
+    - build/ru.nookbat.kotkod.appdata.xml=/usr/share/metainfo/ru.nookbat.kotkod.appdata.xml
+publish:
+  provider: github
+  owner: Serge-Nook
+  repo: kot-kod
+npmRebuild: false

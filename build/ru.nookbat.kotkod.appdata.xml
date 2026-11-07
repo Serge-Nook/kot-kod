@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>ru.nookbat.kotkod</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Кот-код</name>
+  <name xml:lang="en">Kot-kod</name>
+  <summary>Git-клиент для GitHub и GitVerse</summary>
+  <summary xml:lang="en">Git client for GitHub and GitVerse</summary>
+  <description>
+    <p>Графический клиент Git с русскоязычным интерфейсом: изменения и частичная индексация, история с графом, ветки, слияние и rebase, stash, теги, разрешение конфликтов, запросы на слияние и задачи GitHub и GitVerse.</p>
+    <p xml:lang="en">A graphical Git client: partial staging, commit graph, branches, merge and rebase, stash, tags, conflict resolution, GitHub and GitVerse pull requests and issues.</p>
+  </description>
+  <launchable type="desktop-id">kot-kod.desktop</launchable>
+  <url type="homepage">https://nookbat.ru</url>
+  <url type="bugtracker">https://github.com/Serge-Nook/kot-kod/issues</url>
+  <developer id="ru.nookbat">
+    <name>Горшков Сергей Владимирович</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-07"/>
+  </releases>
+</component>
