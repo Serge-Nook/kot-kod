@@ -174,3 +174,23 @@ describe('git ops', () => {
     expect((await ops.status(a)).behind).toBe(1)
   })
 })
+
+describe('release notes', () => {
+  it('lists commits since the previous tag', async () => {
+    const r = await newRepo('notes')
+    sh(r, 'tag', 'v1')
+    writeFileSync(join(r, 'a.txt'), '1')
+    sh(r, 'add', '.')
+    sh(r, 'commit', '-m', 'Первое изменение')
+    writeFileSync(join(r, 'b.txt'), '2')
+    sh(r, 'add', '.')
+    sh(r, 'commit', '-m', 'Второе')
+    sh(r, 'tag', 'v2')
+    const notes = await ops.releaseNotes(r, 'v2')
+    expect(notes.split('\n')).toHaveLength(2)
+    expect(notes).toContain('- Первое изменение (')
+    expect(await ops.releaseNotes(r, 'v3')).toBe(notes)
+    expect(await ops.hasTag(r, 'v1')).toBe(true)
+    expect(await ops.hasTag(r, 'v9')).toBe(false)
+  })
+})

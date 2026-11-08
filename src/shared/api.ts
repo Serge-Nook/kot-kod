@@ -15,6 +15,8 @@ import type {
   ProviderInfo,
   PullFile,
   PullRequest,
+  Release,
+  ReleaseAsset,
   RebaseTodoItem,
   Remote,
   RemoteRepo,
@@ -92,6 +94,7 @@ export interface Api {
     showInFolder(path: string): Promise<void>
     openTerminal(path: string): Promise<void>
     pickDirectory(title: string, defaultPath?: string): Promise<string | null>
+    pickFiles(title: string): Promise<string[]>
     checkUpdate(): Promise<UpdateInfo>
     downloadUpdate(): Promise<void>
     readLogTail(): Promise<string>
@@ -165,6 +168,7 @@ export interface Api {
     writeGitignore(repo: string, content: string): Promise<void>
     ignorePath(repo: string, pattern: string): Promise<void>
     config(repo: string): Promise<{ name: string; email: string }>
+    releaseNotes(repo: string, tag: string): Promise<string>
     setConfig(repo: string | null, name: string, email: string): Promise<void>
   }
   accounts: {
@@ -202,7 +206,32 @@ export interface Api {
     labels(ref: RepoRef): Promise<Label[]>
     notifications(accountId: string): Promise<HostNotification[]>
     markNotificationRead(accountId: string, id: string): Promise<void>
+    releases(ref: RepoRef): Promise<Release[]>
+    createRelease(ref: RepoRef, input: ReleaseInput, files: string[], repoPath?: string): Promise<Release>
+    updateRelease(ref: RepoRef, id: string, patch: Partial<ReleaseInput>): Promise<Release>
+    deleteRelease(ref: RepoRef, id: string): Promise<void>
+    uploadAssets(ref: RepoRef, releaseId: string, files: string[]): Promise<Release>
+    deleteAsset(ref: RepoRef, releaseId: string, assetId: string): Promise<void>
+    downloadAssets(ref: RepoRef, assets: ReleaseAsset[], dir: string): Promise<string[]>
+    copyRelease(from: RepoRef, releaseId: string, to: RepoRef, opts: CopyReleaseOptions): Promise<Release>
   }
+}
+
+export interface ReleaseInput {
+  tag: string
+  name: string
+  body: string
+  /** branch or commit for a tag that does not exist yet */
+  target?: string
+  draft: boolean
+  prerelease: boolean
+}
+
+export interface CopyReleaseOptions {
+  assets: boolean
+  draft: boolean
+  /** local repository used to push the tag when the target lacks it */
+  repoPath?: string
 }
 
 export type ApiEvent =
@@ -211,6 +240,7 @@ export type ApiEvent =
   | { type: 'update-downloaded' }
   | { type: 'update-progress'; percent: number }
   | { type: 'crash-recovered'; report: string }
+  | { type: 'transfer'; label: string; percent: number | null }
 
 export interface ApiError {
   code: string

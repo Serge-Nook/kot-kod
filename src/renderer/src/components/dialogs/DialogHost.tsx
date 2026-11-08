@@ -1,5 +1,7 @@
 import { useStore } from '../../store'
 import { CloneDialog, CreateDialog, NewBranchDialog, PublishDialog, PushRejectedDialog, RebaseDialog, TagDialog } from './RepoDialogs'
+import type { Release } from '@shared/types'
+import { CopyReleaseDialog, ReleaseDialog } from './ReleaseDialogs'
 import { AboutDialog, AddAccountDialog, CreateIssueDialog, CreatePullDialog, UnlockDialog, UpdateDialog } from './HostDialogs'
 
 export function DialogHost() {
@@ -31,6 +33,10 @@ export function DialogHost() {
       return <UnlockDialog />
     case 'update':
       return <UpdateDialog />
+    case 'release':
+      return <ReleaseDialog {...p} />
+    case 'copyRelease':
+      return <CopyReleaseDialog release={d.props?.release as Release} />
     case 'about':
       return <AboutDialog />
     default:

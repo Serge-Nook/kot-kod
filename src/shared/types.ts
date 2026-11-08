@@ -19,6 +19,7 @@ export interface ProviderCapabilities {
   draftPull: boolean
   deleteRepo: boolean
   fork: boolean
+  releases: boolean
 }
 
 export interface ProviderInfo {
@@ -309,4 +310,35 @@ export interface AppInfo {
   logDir: string
   secretsBackend: 'keyring' | 'password' | 'locked'
   electron: string
+}
+
+export interface ReleaseAsset {
+  id: string
+  name: string
+  size: number
+  downloadCount: number
+  /** public web download URL */
+  downloadUrl: string
+  /** API URL of the asset */
+  apiUrl: string
+  contentType?: string
+  createdAt: string
+}
+
+export interface Release {
+  id: string
+  tag: string
+  name: string
+  body: string
+  draft: boolean
+  prerelease: boolean
+  target?: string
+  author: string
+  createdAt: string
+  publishedAt?: string
+  htmlUrl: string
+  uploadUrl?: string
+  tarballUrl?: string
+  zipballUrl?: string
+  assets: ReleaseAsset[]
 }

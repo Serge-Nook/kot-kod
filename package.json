@@ -1,6 +1,6 @@
 {
   "name": "kot-kod",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Кот-код — графический клиент Git для GitHub и GitVerse",
   "main": "./out/main/index.js",
   "homepage": "https://nookbat.ru",

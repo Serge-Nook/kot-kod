@@ -25,6 +25,7 @@ const ICONS: Record<string, string> = {
   terminal: 'M1 2h14v12H1zm2 3l3 3-3 3 1 1 4-4-4-4zm4 6v1h5v-1z',
   copy: 'M4 1h8v2H6v9H4zm3 3h8v11H7z',
   lock: 'M5 7V5a3 3 0 0 1 6 0v2h2v8H3V7zm2 0h2V5a1 1 0 0 0-2 0z',
+  release: 'M8 1l6 3v8l-6 3-6-3V4zm0 2.2L4.5 5 8 6.8 11.5 5zM3.5 6.2v5l3.75 1.9v-5zm9 0l-3.75 1.9v5l3.75-1.9z',
   external: 'M9 1h6v6l-2.3-2.3L8 9.4 6.6 8l4.7-4.7zM1 3h6v2H3v8h8V9h2v6H1z'
 }
 

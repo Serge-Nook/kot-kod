@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { spawn } from 'child_process'
-import { existsSync, promises as fs } from 'fs'
-import { join } from 'path'
+import { createWriteStream, existsSync, promises as fs } from 'fs'
+import { basename, extname, join } from 'path'
+import { once } from 'events'
 import { homedir } from 'os'
 import { AppError } from './errors'
 import { log, mask, tail } from './logger'
@@ -14,8 +15,8 @@ import * as updates from './updates'
 import { configDir, logDir, resourcesDir } from './paths'
 import { parseRemoteUrl, providerForHost } from '../shared/remote'
 import { providers } from './hosting/rest'
-import type { Api, ApiResult, RepoRef } from '../shared/api'
-import type { Settings } from '../shared/types'
+import type { Api, ApiEvent, ApiResult, RepoRef } from '../shared/api'
+import type { Release, Settings } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
 export function setMainWindow(w: BrowserWindow): void {
@@ -27,6 +28,100 @@ function tok(ref: { accountId: string }): string {
 }
 function prov(ref: { accountId: string }) {
   return accounts.provider(accounts.get(ref.accountId).provider)
+}
+
+function emit(e: ApiEvent): void {
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('api-event', e)
+}
+
+const MIME: Record<string, string> = {
+  '.zip': 'application/zip',
+  '.gz': 'application/gzip',
+  '.tgz': 'application/gzip',
+  '.xz': 'application/x-xz',
+  '.7z': 'application/x-7z-compressed',
+  '.deb': 'application/vnd.debian.binary-package',
+  '.rpm': 'application/x-rpm',
+  '.appimage': 'application/x-executable',
+  '.exe': 'application/vnd.microsoft.portable-executable',
+  '.msi': 'application/x-msi',
+  '.dmg': 'application/x-apple-diskimage',
+  '.apk': 'application/vnd.android.package-archive',
+  '.json': 'application/json',
+  '.yml': 'text/yaml',
+  '.yaml': 'text/yaml',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml'
+}
+export function mimeFor(name: string): string {
+  return MIME[extname(name).toLowerCase()] ?? 'application/octet-stream'
+}
+
+async function uploadFiles(ref: RepoRef, release: Release, files: string[]): Promise<void> {
+  const p = prov(ref)
+  for (let i = 0; i < files.length; i++) {
+    const name = basename(files[i])
+    emit({ type: 'transfer', label: `${i + 1}/${files.length} ${name}`, percent: Math.round((i / files.length) * 100) })
+    const data = await fs.readFile(files[i])
+    await p.uploadAsset(tok(ref), ref.owner, ref.repo, release, name, data, mimeFor(name))
+  }
+  emit({ type: 'transfer', label: '', percent: 100 })
+}
+
+async function uniquePath(dir: string, name: string): Promise<string> {
+  const ext = extname(name)
+  const stem = name.slice(0, name.length - ext.length)
+  let path = join(dir, name)
+  for (let i = 1; existsSync(path); i++) path = join(dir, `${stem} (${i})${ext}`)
+  return path
+}
+
+async function saveResponse(res: Response, file: string, label: string): Promise<void> {
+  const total = Number(res.headers.get('content-length')) || 0
+  const tmp = `${file}.part`
+  const out = createWriteStream(tmp)
+  let done = 0
+  let last = 0
+  try {
+    if (!res.body) throw new AppError('NETWORK', 'empty body')
+    const reader = res.body.getReader()
+    for (;;) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      done += chunk.value.length
+      if (!out.write(chunk.value)) await once(out, 'drain')
+      const now = Date.now()
+      if (now - last > 200) {
+        last = now
+        emit({ type: 'transfer', label, percent: total ? Math.round((done / total) * 100) : null })
+      }
+    }
+    out.end()
+    await once(out, 'finish')
+    await fs.rename(tmp, file)
+  } catch (e) {
+    out.destroy()
+    await fs.rm(tmp, { force: true })
+    throw e
+  }
+}
+
+/** Makes sure the tag exists in the target repository, pushing it from the local clone if needed. */
+async function ensureRemoteTag(to: RepoRef, tag: string, repoPath?: string): Promise<void> {
+  const target = await prov(to).repo(tok(to), to.owner, to.repo)
+  const a = accounts.get(to.accountId)
+  const auth = { username: a.login, password: tok(to) }
+  const out = await git(repoPath ?? homedir(), ['ls-remote', '--tags', target.cloneUrl, `refs/tags/${tag}`], { auth })
+  if (out.trim()) return
+  if (repoPath && (await ops.hasTag(repoPath, tag))) {
+    await git(repoPath, ['push', target.cloneUrl, `refs/tags/${tag}`], { auth })
+    return
+  }
+  throw new AppError('TAG_MISSING', tag)
 }
 
 async function waitForRepo(accountId: string, owner: string, repo: string): Promise<void> {
@@ -89,6 +184,10 @@ const impl: Api = {
     },
     async openTerminal(path) {
       openTerminal(path)
+    },
+    async pickFiles(title) {
+      const r = await dialog.showOpenDialog(mainWindow!, { title, properties: ['openFile', 'multiSelections'] })
+      return r.canceled ? [] : r.filePaths
     },
     async pickDirectory(title, defaultPath) {
       const r = await dialog.showOpenDialog(mainWindow!, {
@@ -253,6 +352,7 @@ const impl: Api = {
     writeGitignore: (r, c) => ops.writeGitignore(r, c),
     ignorePath: (r, p) => ops.ignorePath(r, p),
     config: (r) => ops.getConfig(r || homedir()),
+    releaseNotes: (r, tag) => ops.releaseNotes(r, tag),
     setConfig: (r, n, e) => ops.setConfig(r, n, e)
   },
   accounts: {
@@ -285,6 +385,75 @@ const impl: Api = {
     }
   },
   hosting: {
+    async releases(ref) {
+      return prov(ref).releases(tok(ref), ref.owner, ref.repo)
+    },
+    async createRelease(ref, input, files, repoPath) {
+      if (repoPath && !ref.originOwner && !input.draft && (await ops.hasTag(repoPath, input.tag)))
+        await ops.pushTag(repoPath, input.tag)
+      const p = prov(ref)
+      const r = await p.createRelease(tok(ref), ref.owner, ref.repo, input)
+      if (!files.length) return r
+      await uploadFiles(ref, r, files)
+      return p.release(tok(ref), ref.owner, ref.repo, r.id)
+    },
+    async updateRelease(ref, id, patch) {
+      return prov(ref).updateRelease(tok(ref), ref.owner, ref.repo, id, patch)
+    },
+    async deleteRelease(ref, id) {
+      await prov(ref).deleteRelease(tok(ref), ref.owner, ref.repo, id)
+    },
+    async uploadAssets(ref, releaseId, files) {
+      const p = prov(ref)
+      const r = await p.release(tok(ref), ref.owner, ref.repo, releaseId)
+      await uploadFiles(ref, r, files)
+      return p.release(tok(ref), ref.owner, ref.repo, releaseId)
+    },
+    async deleteAsset(ref, releaseId, assetId) {
+      await prov(ref).deleteAsset(tok(ref), ref.owner, ref.repo, releaseId, assetId)
+    },
+    async downloadAssets(ref, assets, dir) {
+      const p = prov(ref)
+      const paths: string[] = []
+      for (let i = 0; i < assets.length; i++) {
+        const label = `${i + 1}/${assets.length} ${assets[i].name}`
+        emit({ type: 'transfer', label, percent: 0 })
+        const res = await p.download(tok(ref), assets[i])
+        const path = await uniquePath(dir, basename(assets[i].name))
+        await saveResponse(res, path, label)
+        paths.push(path)
+      }
+      return paths
+    },
+    async copyRelease(from, releaseId, to, opts) {
+      const src = prov(from)
+      const dst = prov(to)
+      const same =
+        accounts.get(from.accountId).provider === accounts.get(to.accountId).provider &&
+        from.owner.toLowerCase() === to.owner.toLowerCase() &&
+        from.repo.toLowerCase() === to.repo.toLowerCase()
+      if (same) throw new AppError('SAME_REPO', `${to.owner}/${to.repo}`)
+      const rel = await src.release(tok(from), from.owner, from.repo, releaseId)
+      await ensureRemoteTag(to, rel.tag, opts.repoPath)
+      const created = await dst.createRelease(tok(to), to.owner, to.repo, {
+        tag: rel.tag,
+        name: rel.name,
+        body: rel.body,
+        draft: opts.draft || rel.draft,
+        prerelease: rel.prerelease
+      })
+      if (opts.assets) {
+        const n = rel.assets.length
+        for (let i = 0; i < n; i++) {
+          const a = rel.assets[i]
+          emit({ type: 'transfer', label: `${i + 1}/${n} ${a.name}`, percent: Math.round((i / n) * 100) })
+          const res = await src.download(tok(from), a)
+          const data = new Uint8Array(await res.arrayBuffer())
+          await dst.uploadAsset(tok(to), to.owner, to.repo, created, a.name, data, a.contentType ?? mimeFor(a.name))
+        }
+      }
+      return dst.release(tok(to), to.owner, to.repo, created.id)
+    },
     async repos(accountId) {
       return prov({ accountId }).repos(tok({ accountId }))
     },

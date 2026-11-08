@@ -10,6 +10,7 @@ export default function Tags() {
   const t = useT()
   const repo = useStore((s) => s.repo)!
   const revision = useStore((s) => s.revision)
+  const hostRef = useStore((s) => s.hostRef)
   const [tags, setTags] = useState<Tag[]>([])
   useEffect(() => {
     api.git.tags(repo).then(setTags).catch(showError)
@@ -22,6 +23,11 @@ export default function Tags() {
   const push = async (name: string) => {
     const r = await attempt(t('busy.push'), () => api.git.pushTag(repo, name).then(() => true))
     if (r) toast('success', t('tags.pushed', { name }))
+  }
+
+  const release = (tag: string) => {
+    useStore.setState({ view: 'releases' })
+    openDialog('release', { tag })
   }
 
   return (
@@ -41,6 +47,7 @@ export default function Tags() {
             onContextMenu={(e) =>
               showMenu(e, [
                 { label: t('tags.push'), onClick: () => push(tg.name) },
+                ...(hostRef ? [{ label: t('releases.fromTag'), onClick: () => release(tg.name) }] : []),
                 { label: t('common.delete'), danger: true, onClick: () => del(tg.name) }
               ])
             }
@@ -53,6 +60,7 @@ export default function Tags() {
               </div>
             </span>
             <button onClick={() => push(tg.name)}>{t('tags.push')}</button>
+            {hostRef && <button onClick={() => release(tg.name)}>{t('releases.fromTag')}</button>}
             <button className="icon" onClick={() => del(tg.name)} title={t('common.delete')}>
               <Icon name="close" size={12} />
             </button>

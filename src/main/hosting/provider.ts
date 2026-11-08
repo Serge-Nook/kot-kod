@@ -6,6 +6,8 @@ import type {
   ProviderInfo,
   PullFile,
   PullRequest,
+  Release,
+  ReleaseAsset,
   RemoteRepo
 } from '../../shared/types'
 import type {
@@ -13,6 +15,7 @@ import type {
   CreatePullInput,
   CreateRemoteRepoInput,
   MergeMethod,
+  ReleaseInput,
   ReviewEvent
 } from '../../shared/api'
 
@@ -47,4 +50,15 @@ export interface IHostingProvider {
   labels(token: string, owner: string, repo: string): Promise<Label[]>
   notifications(token: string): Promise<HostNotification[]>
   markNotificationRead(token: string, id: string): Promise<void>
+  releases(token: string, owner: string, repo: string): Promise<Release[]>
+  release(token: string, owner: string, repo: string, id: string): Promise<Release>
+  createRelease(token: string, owner: string, repo: string, input: ReleaseInput): Promise<Release>
+  updateRelease(token: string, owner: string, repo: string, id: string, patch: Partial<ReleaseInput>): Promise<Release>
+  deleteRelease(token: string, owner: string, repo: string, id: string): Promise<void>
+  /** asset name accepted by the hosting (may sanitize characters) */
+  assetName(name: string): string
+  uploadAsset(token: string, owner: string, repo: string, release: Release, name: string, data: Uint8Array, contentType: string): Promise<ReleaseAsset>
+  deleteAsset(token: string, owner: string, repo: string, releaseId: string, assetId: string): Promise<void>
+  /** starts an authenticated download; the caller consumes the body */
+  download(token: string, asset: ReleaseAsset): Promise<Response>
 }
