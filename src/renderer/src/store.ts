@@ -17,6 +17,7 @@ export type View =
   | 'branches'
   | 'stash'
   | 'tags'
+  | 'releases'
   | 'pulls'
   | 'issues'
   | 'notifications'
@@ -49,6 +50,8 @@ export type DialogName =
   | 'confirm'
   | 'prompt'
   | 'update'
+  | 'release'
+  | 'copyRelease'
 
 export interface DialogState {
   name: DialogName

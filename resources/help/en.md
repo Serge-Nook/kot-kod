@@ -39,6 +39,18 @@ All local operations work offline; once back online the app reminds you about un
 - **Forks**: in **Repository** press **Fork** — origin points to your fork, upstream to the original.
 - **Notifications** are available for GitHub; GitVerse does not expose them via API yet.
 
+## Releases
+
+The Releases section lists repository releases on GitHub or GitVerse.
+
+- **New release** — pick an existing tag or type a new one (the hosting creates it on the given branch), set a title and notes. “Fill with commit list” adds commits since the previous tag. Files (AppImage, deb, archives) are attached on publish. An unpushed local tag is pushed automatically.
+- **Draft** is saved without publishing; publish it later with “Publish”.
+- **Upload files** adds files to an existing release. GitVerse allows only Latin letters, digits, “_”, “-” and “.” in file names: Cyrillic is transliterated.
+- **Download / Download all** saves release files to a folder, private repositories included.
+- **Copy link** puts the release or file link on the clipboard.
+- **Copy to another repository** moves a release with notes and files to another repository, e.g. from GitHub to GitVerse. A missing tag is pushed from the open local repository.
+- In Tags, use “Create release” next to a tag.
+
 ## Security
 
 Tokens are kept in the system keyring (Secret Service / libsecret). If it is unavailable (e.g. Steam Deck Game Mode) tokens are encrypted with a password you choose on first run. Tokens never appear in logs.

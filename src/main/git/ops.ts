@@ -726,3 +726,29 @@ export async function clone(url: string, parentDir: string, auth: Credentials | 
   )
   return target
 }
+
+export async function hasTag(repo: string, tag: string): Promise<boolean> {
+  try {
+    await git(repo, ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Markdown list of commits since the previous tag, used as default release notes. */
+export async function releaseNotes(repo: string, tag: string): Promise<string> {
+  const end = (await hasTag(repo, tag)) ? `refs/tags/${tag}` : 'HEAD'
+  let prev: string | null = null
+  try {
+    prev = (await git(repo, ['describe', '--tags', '--abbrev=0', `${end}^`])).trim() || null
+  } catch {
+    prev = null
+  }
+  try {
+    const out = await git(repo, ['log', '--no-merges', '--pretty=format:- %s (%h)', prev ? `${prev}..${end}` : end])
+    return out.trim()
+  } catch {
+    return ''
+  }
+}

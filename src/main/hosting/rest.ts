@@ -7,6 +7,8 @@ import type {
   ProviderInfo,
   PullFile,
   PullRequest,
+  Release,
+  ReleaseAsset,
   RemoteRepo
 } from '../../shared/types'
 import type {
@@ -14,6 +16,7 @@ import type {
   CreatePullInput,
   CreateRemoteRepoInput,
   MergeMethod,
+  ReleaseInput,
   ReviewEvent
 } from '../../shared/api'
 import type { HostUser, IHostingProvider } from './provider'
@@ -47,6 +50,63 @@ export abstract class RestProvider implements IHostingProvider {
     }
   }
 
+  protected async fail(res: Response): Promise<never> {
+    let text = ''
+    try {
+      text = await res.text()
+    } catch {
+      /* ignore */
+    }
+    let message = text
+    try {
+      const j = JSON.parse(text)
+      message = j?.message ?? j?.error?.message ?? text
+      if (j?.errors?.length)
+        message += ': ' + j.errors.map((x: J) => x.message ?? x.code ?? JSON.stringify(x)).join('; ')
+    } catch {
+      /* not json */
+    }
+    const remaining = res.headers.get('x-ratelimit-remaining')
+    if (res.status === 429 || (res.status === 403 && remaining === '0')) {
+      const reset = res.headers.get('x-ratelimit-reset')
+      throw new AppError(
+        'RATE_LIMIT',
+        message,
+        reset ? new Date(Number(reset) * 1000).toISOString() : undefined
+      )
+    }
+    if (res.status === 401) throw new AppError('AUTH_FAILED', message)
+    if (res.status === 404) throw new AppError('NOT_FOUND', message)
+    if (res.status === 403) throw new AppError('FORBIDDEN', message)
+    if (res.status === 405 || res.status === 501) throw new AppError('NOT_SUPPORTED', message)
+    if (res.status === 409) throw new AppError('API_CONFLICT', message)
+    if (res.status === 422) throw new AppError('VALIDATION', message)
+    throw new AppError('API_ERROR', `${res.status} ${message}`)
+  }
+
+  protected checkUrl(url: string): void {
+    if (!url.startsWith('https://') && !process.env.KOTKOD_ALLOW_HTTP) throw new AppError('HTTPS_ONLY', url)
+  }
+
+  /** single request with a raw (binary or multipart) body */
+  protected async send(token: string, method: string, url: string, body: Uint8Array | FormData, contentType?: string): Promise<J> {
+    this.checkUrl(url)
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method,
+        headers: { ...this.headers(token), ...(contentType ? { 'Content-Type': contentType } : {}) },
+        body
+      })
+    } catch (e) {
+      throw new AppError('NETWORK', String((e as Error).message ?? e))
+    }
+    httpLog(`${method} ${url} -> ${res.status}`)
+    if (!res.ok) await this.fail(res)
+    const text = await res.text()
+    return text ? JSON.parse(text) : null
+  }
+
   protected async request(
     token: string,
     method: string,
@@ -55,8 +115,7 @@ export abstract class RestProvider implements IHostingProvider {
     raw = false
   ): Promise<{ data: J; link: string | null }> {
     const url = path.startsWith('http') ? path : this.apiBase + path
-    if (!url.startsWith('https://') && !process.env.KOTKOD_ALLOW_HTTP)
-      throw new AppError('HTTPS_ONLY', url)
+    this.checkUrl(url)
     let attempt = 0
     for (;;) {
       attempt++
@@ -83,39 +142,7 @@ export abstract class RestProvider implements IHostingProvider {
         await new Promise((r) => setTimeout(r, 800 * attempt))
         continue
       }
-      if (!res.ok) {
-        let text = ''
-        try {
-          text = await res.text()
-        } catch {
-          /* ignore */
-        }
-        let message = text
-        try {
-          const j = JSON.parse(text)
-          message = j?.message ?? j?.error?.message ?? text
-          if (j?.errors?.length)
-            message += ': ' + j.errors.map((x: J) => x.message ?? x.code ?? JSON.stringify(x)).join('; ')
-        } catch {
-          /* not json */
-        }
-        const remaining = res.headers.get('x-ratelimit-remaining')
-        if (res.status === 429 || (res.status === 403 && remaining === '0')) {
-          const reset = res.headers.get('x-ratelimit-reset')
-          throw new AppError(
-            'RATE_LIMIT',
-            message,
-            reset ? new Date(Number(reset) * 1000).toISOString() : undefined
-          )
-        }
-        if (res.status === 401) throw new AppError('AUTH_FAILED', message)
-        if (res.status === 404) throw new AppError('NOT_FOUND', message)
-        if (res.status === 403) throw new AppError('FORBIDDEN', message)
-        if (res.status === 405 || res.status === 501) throw new AppError('NOT_SUPPORTED', message)
-        if (res.status === 409) throw new AppError('API_CONFLICT', message)
-        if (res.status === 422) throw new AppError('VALIDATION', message)
-        throw new AppError('API_ERROR', `${res.status} ${message}`)
-      }
+      if (!res.ok) await this.fail(res)
       if (res.status === 204 || raw) return { data: null, link: res.headers.get('link') }
       const text = await res.text()
       return { data: text ? JSON.parse(text) : null, link: res.headers.get('link') }
@@ -126,9 +153,9 @@ export abstract class RestProvider implements IHostingProvider {
     return (await this.request(token, 'GET', path)).data
   }
 
-  protected async paged(token: string, path: string, max = 1000): Promise<J[]> {
+  protected async paged(token: string, path: string, max = 1000, perPage = this.perPage): Promise<J[]> {
     const sep = path.includes('?') ? '&' : '?'
-    let url: string | null = `${path}${sep}per_page=${this.perPage}`
+    let url: string | null = `${path}${sep}per_page=${perPage}`
     const all: J[] = []
     while (url && all.length < max) {
       const { data, link } = await this.request(token, 'GET', url)
@@ -338,6 +365,117 @@ export abstract class RestProvider implements IHostingProvider {
     return list.map((l) => ({ name: l.name, color: l.color ?? '888888' }))
   }
 
+  protected mapAsset(a: J): ReleaseAsset {
+    return {
+      id: String(a.id),
+      name: a.name ?? '',
+      size: Number(a.size ?? 0),
+      downloadCount: Number(a.download_count ?? 0),
+      downloadUrl: a.browser_download_url ?? '',
+      apiUrl: a.url ?? '',
+      contentType: a.content_type || undefined,
+      createdAt: a.created_at ?? ''
+    }
+  }
+
+  protected releaseHtmlUrl(r: J, owner: string, repo: string): string {
+    return r.html_url || `${this.info.webUrl}/${owner}/${repo}/releases/tag/${encodeURIComponent(r.tag_name ?? '')}`
+  }
+
+  protected mapRelease(r: J, owner: string, repo: string): Release {
+    return {
+      id: String(r.id),
+      tag: r.tag_name ?? '',
+      name: r.name || r.tag_name || '',
+      body: r.body ?? '',
+      draft: !!r.draft,
+      prerelease: !!r.prerelease,
+      target: r.target_commitish || undefined,
+      author: r.author?.login ?? '',
+      createdAt: r.created_at ?? '',
+      publishedAt: r.published_at || undefined,
+      htmlUrl: this.releaseHtmlUrl(r, owner, repo),
+      uploadUrl: r.upload_url ? String(r.upload_url).replace(/\{.*\}$/, '') : undefined,
+      tarballUrl: r.tarball_url || undefined,
+      zipballUrl: r.zipball_url || undefined,
+      assets: (r.assets ?? []).map((a: J) => this.mapAsset(a))
+    }
+  }
+
+  protected releaseBody(input: Partial<ReleaseInput>): J {
+    const b: J = {}
+    if (input.tag !== undefined) b.tag_name = input.tag
+    if (input.name !== undefined) b.name = input.name
+    if (input.body !== undefined) b.body = input.body
+    if (input.target) b.target_commitish = input.target
+    if (input.draft !== undefined) b.draft = input.draft
+    if (input.prerelease !== undefined) b.prerelease = input.prerelease
+    return b
+  }
+
+  async releases(token: string, owner: string, repo: string): Promise<Release[]> {
+    const list = await this.paged(token, `/repos/${owner}/${repo}/releases`, 300)
+    return list.map((r) => this.mapRelease(r, owner, repo))
+  }
+
+  async release(token: string, owner: string, repo: string, id: string): Promise<Release> {
+    return this.mapRelease(await this.get(token, `/repos/${owner}/${repo}/releases/${id}`), owner, repo)
+  }
+
+  async createRelease(token: string, owner: string, repo: string, input: ReleaseInput): Promise<Release> {
+    const { data } = await this.request(token, 'POST', `/repos/${owner}/${repo}/releases`, this.releaseBody(input))
+    return this.mapRelease(data, owner, repo)
+  }
+
+  async updateRelease(token: string, owner: string, repo: string, id: string, patch: Partial<ReleaseInput>): Promise<Release> {
+    const { data } = await this.request(token, 'PATCH', `/repos/${owner}/${repo}/releases/${id}`, this.releaseBody(patch))
+    return this.mapRelease(data, owner, repo)
+  }
+
+  async deleteRelease(token: string, owner: string, repo: string, id: string): Promise<void> {
+    await this.request(token, 'DELETE', `/repos/${owner}/${repo}/releases/${id}`)
+  }
+
+  assetName(name: string): string {
+    return name
+  }
+
+  async uploadAsset(
+    token: string,
+    owner: string,
+    repo: string,
+    release: Release,
+    name: string,
+    data: Uint8Array,
+    contentType: string
+  ): Promise<ReleaseAsset> {
+    const base = release.uploadUrl ?? `${this.apiBase}/repos/${owner}/${repo}/releases/${release.id}/assets`
+    const url = `${base}?name=${encodeURIComponent(this.assetName(name))}`
+    return this.mapAsset(await this.send(token, 'POST', url, data, contentType))
+  }
+
+  async deleteAsset(token: string, owner: string, repo: string, _releaseId: string, assetId: string): Promise<void> {
+    await this.request(token, 'DELETE', `/repos/${owner}/${repo}/releases/assets/${assetId}`)
+  }
+
+  protected downloadRequest(token: string, asset: ReleaseAsset): { url: string; headers: Record<string, string> } {
+    return { url: asset.downloadUrl, headers: { ...this.headers(token), Accept: '*/*' } }
+  }
+
+  async download(token: string, asset: ReleaseAsset): Promise<Response> {
+    const { url, headers } = this.downloadRequest(token, asset)
+    this.checkUrl(url)
+    let res: Response
+    try {
+      res = await fetch(url, { headers, redirect: 'follow' })
+    } catch (e) {
+      throw new AppError('NETWORK', String((e as Error).message ?? e))
+    }
+    httpLog(`GET ${url} -> ${res.status}`)
+    if (!res.ok) await this.fail(res)
+    return res
+  }
+
   async notifications(_token: string): Promise<HostNotification[]> {
     throw new AppError('NOT_SUPPORTED')
   }
@@ -363,12 +501,18 @@ export class GitHubProvider extends RestProvider {
       prReviews: true,
       draftPull: true,
       deleteRepo: true,
-      fork: true
+      fork: true,
+      releases: true
     }
   }
 
   protected headers(token: string): Record<string, string> {
     return { ...super.headers(token), 'X-GitHub-Api-Version': '2022-11-28' }
+  }
+
+  protected downloadRequest(token: string, asset: ReleaseAsset): { url: string; headers: Record<string, string> } {
+    if (!asset.apiUrl) return super.downloadRequest(token, asset)
+    return { url: asset.apiUrl, headers: { ...this.headers(token), Accept: 'application/octet-stream' } }
   }
 
   async searchMyPulls(token: string, login: string, state: 'open' | 'closed'): Promise<PullRequest[]> {
@@ -421,6 +565,12 @@ function apiToHtml(api: string | undefined, repoHtml: string | undefined): strin
   return `https://github.com/${m[1]}/${kind}/${m[3]}`
 }
 
+const TRANSLIT: Record<string, string> = Object.fromEntries(
+  'а:a б:b в:v г:g д:d е:e ё:e ж:zh з:z и:i й:y к:k л:l м:m н:n о:o п:p р:r с:s т:t у:u ф:f х:kh ц:ts ч:ch ш:sh щ:shch ъ: ы:y ь: э:e ю:yu я:ya'
+    .split(' ')
+    .map((p) => p.split(':') as [string, string])
+)
+
 export class GitVerseProvider extends RestProvider {
   apiBase = process.env.KOTKOD_GITVERSE_API || 'https://api.gitverse.ru'
   protected accept = 'application/vnd.gitverse.object+json;version=1'
@@ -438,8 +588,57 @@ export class GitVerseProvider extends RestProvider {
       prReviews: true,
       draftPull: false,
       deleteRepo: true,
-      fork: true
+      fork: true,
+      releases: true
     }
+  }
+
+  protected releaseHtmlUrl(r: J, owner: string, repo: string): string {
+    return `${this.info.webUrl}/${owner}/${repo}/releases/tag/${encodeURIComponent(r.tag_name ?? '')}`
+  }
+
+  async releases(token: string, owner: string, repo: string): Promise<Release[]> {
+    const list = await this.paged(token, `/repos/${owner}/${repo}/releases`, 300, 30)
+    return list.map((r) => this.mapRelease(r, owner, repo))
+  }
+
+  async release(token: string, owner: string, repo: string, id: string): Promise<Release> {
+    const r = this.mapRelease(await this.get(token, `/repos/${owner}/${repo}/releases/${id}`), owner, repo)
+    if (!r.assets.length) {
+      const assets = await this.paged(token, `/repos/${owner}/${repo}/releases/${id}/assets`, 500, 50)
+      r.assets = assets.map((a) => this.mapAsset(a))
+    }
+    return r
+  }
+
+  /** GitVerse accepts only Latin letters, digits, `_`, `-` and `.` in asset names */
+  assetName(name: string): string {
+    const latin = [...name].map((c) => {
+      const l = TRANSLIT[c.toLowerCase()]
+      if (l === undefined) return c
+      return c === c.toLowerCase() ? l : l.charAt(0).toUpperCase() + l.slice(1)
+    })
+    return latin.join('').replace(/[^A-Za-z0-9_.-]+/g, '_').slice(-255)
+  }
+
+  async uploadAsset(
+    token: string,
+    owner: string,
+    repo: string,
+    release: Release,
+    name: string,
+    data: Uint8Array,
+    contentType: string
+  ): Promise<ReleaseAsset> {
+    const n = this.assetName(name)
+    const form = new FormData()
+    form.append('attachment', new Blob([data], { type: contentType }), n)
+    const url = `${this.apiBase}/repos/${owner}/${repo}/releases/${release.id}/assets?name=${encodeURIComponent(n)}`
+    return this.mapAsset(await this.send(token, 'POST', url, form))
+  }
+
+  async deleteAsset(token: string, owner: string, repo: string, releaseId: string, assetId: string): Promise<void> {
+    await this.request(token, 'DELETE', `/repos/${owner}/${repo}/releases/${releaseId}/assets/${assetId}`)
   }
 
   async createPull(token: string, owner: string, repo: string, input: CreatePullInput): Promise<PullRequest> {

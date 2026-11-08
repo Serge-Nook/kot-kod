@@ -29,6 +29,7 @@ import Stash from './views/Stash'
 import Tags from './views/Tags'
 import Pulls from './views/Pulls'
 import Issues from './views/Issues'
+import Releases from './views/Releases'
 import Notifications from './views/Notifications'
 import RepoSettings from './views/RepoSettings'
 import Accounts from './views/Accounts'
@@ -44,6 +45,7 @@ const REPO_VIEWS: { id: View; icon: string; key: string }[] = [
   { id: 'branches', icon: 'branch', key: 'nav.branches' },
   { id: 'stash', icon: 'stash', key: 'nav.stash' },
   { id: 'tags', icon: 'tag', key: 'nav.tags' },
+  { id: 'releases', icon: 'release', key: 'nav.releases' },
   { id: 'pulls', icon: 'pull', key: 'nav.pulls' },
   { id: 'issues', icon: 'issue', key: 'nav.issues' },
   { id: 'repo', icon: 'repo', key: 'nav.repo' }
@@ -304,6 +306,8 @@ function Content() {
       return <Stash />
     case 'tags':
       return <Tags />
+    case 'releases':
+      return <Releases />
     case 'pulls':
       return <Pulls />
     case 'issues':
@@ -338,6 +342,7 @@ export default function App() {
       .finally(() => setReady(true))
     const off = onEvent((e) => {
       if (e.type === 'progress' && e.repo === useStore.getState().repo) useStore.setState({ progress: e.progress })
+      if (e.type === 'transfer') useStore.setState({ progress: { op: 'transfer', phase: e.label, percent: e.percent, line: e.label } })
       if (e.type === 'repo-changed' && e.repo === useStore.getState().repo) refresh()
       if (e.type === 'crash-recovered') toast('error', t('crash.recovered'), e.report, { label: t('help.report'), run: () => api.app.reportProblem() })
       if (e.type === 'update-downloaded') toast('success', t('update.downloaded'))
